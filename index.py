@@ -37,21 +37,33 @@ def index():
         else:
             abort(403)
 
-        if request.headers.get('X-GitHub-Event') == "ping":
+        event = request.headers.get('X-GitHub-Event')
+
+        if event == "ping":
             return json.dumps({'msg': 'Hi!'})
-        if request.headers.get('X-GitHub-Event') != "push":
-            return json.dumps({'msg': "wrong event type"})
+        #if event != "push":
+        #    return json.dumps({'msg': "wrong event type"})
 
         repos = json.loads(io.open(REPOS_JSON_PATH, 'r').read())
 
         payload = json.loads(request.data)
-        repo_meta = {
-            'name': payload['repository']['name'],
-            'owner': payload['repository']['owner']['name'],
-        }
+        try:
+            repo_meta = {
+                'name': payload['repository']['name'],
+                'owner': payload['repository']['owner']['name'],
+            }
+        except KeyError:
+            repo_meta = {
+                'name': payload['repository']['name'],
+                'owner': payload['repository']['owner']['login'],
+            }
 
         # Try to match on branch as configured in repos.json
-        match = re.match(r"refs/heads/(?P<branch>.*)", payload['ref'])
+        try:
+            match = re.match(r"refs/heads/(?P<branch>.*)", payload['ref'])
+            print match
+        except KeyError:
+            match = re.match(r"(?P<branch>.*)", payload['release']['target_commitish'])
         if match:
             repo_meta['branch'] = match.groupdict()['branch']
             repo = repos.get('{owner}/{name}/branch:{branch}'.format(**repo_meta), None)
@@ -69,10 +81,16 @@ def index():
                 if mac.hexdigest() != signature:
                     abort(403)
 
-            if repo.get('action', None):
-                for action in repo['action']:
+            actions = repo.get('action', None)
+            if actions:
+                if not actions.get(event, None):
+                    return json.dumps({'msg': "no handler registered for event type"})
+                if event == 'release':
+                    os.environ['GIT_TAG'] = payload['release']['tag_name']
+                for action in actions[event]:
                     subp = subprocess.Popen(action,
-                             cwd=repo['path'])
+                             cwd=repo['path'],
+                             env=os.environ)
                     subp.wait()
         return 'OK'
 
