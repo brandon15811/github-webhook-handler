@@ -41,8 +41,8 @@ def index():
 
         if event == "ping":
             return json.dumps({'msg': 'Hi!'})
-        #if event != "push":
-        #    return json.dumps({'msg': "wrong event type"})
+        if event != "push" and event != "release":
+            return json.dumps({'msg': "wrong event type"})
 
         repos = json.loads(io.open(REPOS_JSON_PATH, 'r').read())
 
@@ -71,6 +71,8 @@ def index():
             # Fallback to plain owner/name lookup
             if not repo:
                repo = repos.get('{owner}/{name}'.format(**repo_meta), None)
+        else:
+            return json.dumps({'msg': 'No branch match'})
 
         if repo and repo.get('path', None):
             # Check if POST request signature is valid
@@ -81,7 +83,7 @@ def index():
                 if mac.hexdigest() != signature:
                     abort(403)
 
-            actions = repo.get('action', None)
+            actions = repo.get('actions', None)
             if actions:
                 if not actions.get(event, None):
                     return json.dumps({'msg': "no handler registered for event type"})
