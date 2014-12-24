@@ -87,6 +87,8 @@ def index():
                     return json.dumps({'msg': "no handler registered for event type"})
                 if event == 'release':
                     os.environ['GIT_TAG'] = payload['release']['tag_name']
+                os.environ['REPO_OWNER'] = repo_meta['owner']
+                os.environ['REPO_NAME'] = repo_meta['name']
                 for action in actions[event]:
                     subp = subprocess.Popen(action,
                              cwd=repo['path'],
