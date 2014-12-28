@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+#TODO: Use a proper WSGI server
 import io
 import os
 import re
@@ -11,15 +12,19 @@ import hmac
 from hashlib import sha1
 from flask import Flask, request, abort
 from werkzeug.contrib.fixers import ProxyFix
+from docker import Client
 from pymongo import MongoClient
-mongodb_host = os.getenv('MONGODB_HOST', None) or os.getenv('DB_PORT_27017_TCP_ADDR', None) or 'localhost'
-mongodb_port = os.getenv('MONGODB_PORT', None) or os.getenv('DB_PORT_27017_TCP_PORT', None) or 27017
+
+mongodb_host = os.getenv('MONGODB_HOST', None) or os.getenv('MONGO_PORT_27017_TCP_ADDR', None) or 'localhost'
+mongodb_port = os.getenv('MONGODB_PORT', None) or os.getenv('MONGO_PORT_27017_TCP_PORT', None) or 27017
+
 client = MongoClient(mongodb_host, int(mongodb_port))
 db = client.github_webhook_builder
 
+docker = Client(base_url='unix://var/run/docker.sock')
 
 app = Flask(__name__)
-app.debug = os.environ.get('DEBUG') == 'true'
+app.debug = os.environ.get('DEBUG').lower() == 'true'
 
 @app.route("/", methods=['GET', 'POST'])
 def index():
@@ -62,6 +67,7 @@ def index():
                 'owner': payload['repository']['owner']['login'],
             }
 
+        #TODO: Fix crash on tag push
         # Try to match on branch as configured in json config
         try:
             match = re.match(r"refs/heads/(?P<branch>.*)", payload['ref'])
@@ -93,15 +99,47 @@ def index():
             if actions:
                 if not actions.get(event, None):
                     return json.dumps({'msg': "no handler registered for event type"})
+                env = {}
+                command = '/usr/sbin/aa-exec -p plugin_build -- /tools/build.sh'
                 if event == 'release':
-                    os.environ['GIT_TAG'] = payload['release']['tag_name']
-                os.environ['REPO_OWNER'] = repo_meta['owner']
-                os.environ['REPO_NAME'] = repo_meta['name']
-                for action in actions[event]:
-                    subp = subprocess.Popen(action,
-                             cwd=repo['path'],
-                             env=os.environ)
-                    subp.wait()
+                    env['GIT_TAG'] = payload['release']['tag_name']
+                    command = '/usr/sbin/aa-exec -p plugin_build -- /tools/build.sh -r'
+                env['REPO_OWNER'] = repo_meta['owner']
+                env['REPO_NAME'] = repo_meta['name']
+                if os.environ.get('SERVER_NAME', None):
+                    #Get image name from fig project name
+                    image_name = os.environ['SERVER_NAME'].split('/')[1].split('_')[0] + '_build'
+                else:
+                    image_name = 'pdchook_build'
+                container = docker.create_container(
+                    image=image_name,
+                    command=command,
+                    environment=env,
+                    volumes=['/builds']
+                )
+                docker.start(container,
+                    cap_drop=['all'],
+                    binds={
+                        '/var/www/pluginbuild':
+                            {
+                                'bind': '/builds',
+                                'ro': False
+                            }
+                    }
+                )
+                #TODO: Remove this for production
+                if app.debug:
+                    docker.wait(container)
+                    print docker.logs(container, stdout=True, stderr=True, timestamps=True)
+                    docker.remove_container(container)
+                #TODO: Compile all actions into one script (maybe use docker exec instead?)
+#                for action in actions[event]:
+#                    subp = subprocess.Popen(action,
+#                             cwd=repo['path'],
+#                             env=env)
+#                    subp.wait()
+        else:
+            abort(404)
         return 'OK'
 
 #Check if python version is less than 2.7.7
