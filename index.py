@@ -106,9 +106,9 @@ def index():
                     command = '/usr/sbin/aa-exec -p plugin_build -- /tools/build.sh -r'
                 env['REPO_OWNER'] = repo_meta['owner']
                 env['REPO_NAME'] = repo_meta['name']
-                if os.environ.get('SERVER_NAME', None):
+                if os.environ.get('MONGO_NAME', None):
                     #Get image name from fig project name
-                    image_name = os.environ['SERVER_NAME'].split('/')[1].split('_')[0] + '_build'
+                    image_name = os.environ['MONGO_NAME'].split('/')[1].split('_')[0] + '_build'
                 else:
                     image_name = 'pdchook_build'
                 container = docker.create_container(
@@ -132,6 +132,7 @@ def index():
                     docker.wait(container)
                     print docker.logs(container, stdout=True, stderr=True, timestamps=True)
                     docker.remove_container(container)
+                    sys.stdout.flush()
                 #TODO: Compile all actions into one script (maybe use docker exec instead?)
 #                for action in actions[event]:
 #                    subp = subprocess.Popen(action,
