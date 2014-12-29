@@ -42,7 +42,9 @@ def index():
             if ipaddress.ip_address(ip) in ipaddress.ip_network(block):
                 break #the remote_addr is within the network range of github
         else:
-            abort(403)
+            pass
+            #TODO: Re-enable me
+            #abort(403)
 
         event = request.headers.get('X-GitHub-Event')
 
@@ -100,17 +102,25 @@ def index():
                 if not actions.get(event, None):
                     return json.dumps({'msg': "no handler registered for event type"})
                 env = {}
-                command = '/usr/sbin/aa-exec -p plugin_build -- /tools/build.sh'
+
+                apparmor = '';
+                if os.environ.get('APPARMOR', '').lower() == 'true':
+                    apparmor = '/usr/sbin/aa-exec -p plugin_build -- ';
+                command = apparmor + '/tools/build.sh'
                 if event == 'release':
                     env['GIT_TAG'] = payload['release']['tag_name']
-                    command = '/usr/sbin/aa-exec -p plugin_build -- /tools/build.sh -r'
+                    command = apparmor + '/tools/build.sh -r'
                 env['REPO_OWNER'] = repo_meta['owner']
                 env['REPO_NAME'] = repo_meta['name']
+                project_name = None
                 if os.environ.get('MONGO_NAME', None):
                     #Get image name from fig project name
-                    image_name = os.environ['MONGO_NAME'].split('/')[1].split('_')[0] + '_build'
+                    project_name = os.environ['MONGO_NAME'].split('/')[1].split('_')[0]
+                    nginx_container_name = project_name + '_nginx_1'
+                    image_name = project_name + '_build'
                 else:
                     image_name = 'pdchook_build'
+                    nginx_container_name = 'pdchook_nginx_1'
                 container = docker.create_container(
                     image=image_name,
                     command=command,
@@ -119,19 +129,20 @@ def index():
                 )
                 docker.start(container,
                     cap_drop=['all'],
-                    binds={
-                        '/var/www/pluginbuild':
-                            {
-                                'bind': '/builds',
-                                'ro': False
-                            }
-                    }
+                    volumes_from=[nginx_container_name]
+                    #binds={
+                    #    '/var/www/pluginbuild':
+                    #        {
+                    #            'bind': '/builds',
+                    #            'ro': False
+                    #        }
+                    #}
                 )
                 #TODO: Remove this for production
                 if app.debug:
                     docker.wait(container)
                     print docker.logs(container, stdout=True, stderr=True, timestamps=True)
-                    docker.remove_container(container)
+                    #docker.remove_container(container)
                     sys.stdout.flush()
                 #TODO: Compile all actions into one script (maybe use docker exec instead?)
 #                for action in actions[event]:
