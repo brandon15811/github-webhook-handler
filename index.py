@@ -19,7 +19,7 @@ mongodb_host = os.getenv('MONGODB_HOST', None) or os.getenv('MONGO_PORT_27017_TC
 mongodb_port = os.getenv('MONGODB_PORT', None) or os.getenv('MONGO_PORT_27017_TCP_PORT', None) or 27017
 
 client = MongoClient(mongodb_host, int(mongodb_port))
-db = client.github_webhook_builder
+db = client.builder
 
 docker = Client(base_url='unix://var/run/docker.sock')
 
@@ -121,6 +121,7 @@ def index():
                 else:
                     image_name = 'pdchook_build'
                     nginx_container_name = 'pdchook_nginx_1'
+                #TODO: Add container name
                 container = docker.create_container(
                     image=image_name,
                     command=command,
@@ -129,7 +130,8 @@ def index():
                 )
                 docker.start(container,
                     cap_drop=['all'],
-                    volumes_from=[nginx_container_name]
+                    volumes_from=[nginx_container_name],
+                    links={nginx_container_name: 'nginx'}
                     #binds={
                     #    '/var/www/pluginbuild':
                     #        {
@@ -139,11 +141,11 @@ def index():
                     #}
                 )
                 #TODO: Remove this for production
-                if app.debug:
-                    docker.wait(container)
-                    print docker.logs(container, stdout=True, stderr=True, timestamps=True)
+                #if app.debug:
+                    #docker.wait(container)
+                    #print docker.logs(container, stdout=True, stderr=True, timestamps=True)
                     #docker.remove_container(container)
-                    sys.stdout.flush()
+                    #sys.stdout.flush()
                 #TODO: Compile all actions into one script (maybe use docker exec instead?)
 #                for action in actions[event]:
 #                    subp = subprocess.Popen(action,
